@@ -86,8 +86,8 @@ MAX_IDS = 500
 
 
 client = AsyncOpenAI(
-    api_key=os.getenv("openrouter_key"),
-    base_url=os.getenv("api_base_url", "https://openrouter.ai/api/v1")
+    api_key=os.getenv("OPENROUTER_KEY"),
+    base_url=os.getenv("API_BASE_URL", "https://openrouter.ai/api/v1")
 )
 
 async def is_model_callable(model_id:str)-> bool:
@@ -429,8 +429,8 @@ async def send_telegram(throttler, msg:str):
         throttler (Throttler): Throttler instance to limit request rate.
         msg (str): The message content to send.
     """
-    token = os.getenv("tg_bot_token")
-    chat_id = os.getenv("chat_id")
+    token = os.getenv("TG_BOT_TOKEN")
+    chat_id = os.getenv("CHAT_ID")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     async with throttler:
         async with aiohttp.ClientSession() as session:
