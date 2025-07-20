@@ -34,7 +34,7 @@ from tenacity import (
 from asyncio_throttle import Throttler
 import aiohttp
 import logging
-
+import feedparser
 # nest_asyncio.apply()
 
 load_dotenv()
@@ -147,17 +147,13 @@ async def update_good_models(useless_models)-> Tuple[list, dict]:
     return cache, useless_models
     
 
-
-    
-
-
 def parse_llm_response(resp) -> str:
     """
     適配新版 openai.ChatCompletion 回傳物件（Pydantic 模型）
     """
     if not resp or not resp.choices:
         return "[❌ Invalid response structure]"
-
+    # pdb.set_trace()
     choice = resp.choices[0]
 
     # 優先: 標準 OpenAI 格式
@@ -183,7 +179,10 @@ def parse_llm_response(resp) -> str:
 
     return "[⚠️ No usable content in response]"
 
-
+@retry(
+wait=wait_exponential_jitter(initial=1, exp_base=2, jitter=2, max=10),
+after=log_retry_error,
+)
 async def download_and_extract_pdf_text(pdf_url:str):
     """Download a PDF file and extract its text content.
 
@@ -197,26 +196,26 @@ async def download_and_extract_pdf_text(pdf_url:str):
     headers = {"User-Agent": "Mozilla/5.0"}
     
     async with aiohttp.ClientSession() as session:
-        async with session.get(pdf_url, headers=headers) as response:
-            if response.status != 200:
-                print("❌ Failed to download PDF:", response.status)
-                return None
-            else:
-                print("✅ PDF downloaded successfully.")
-                content = await response.read()  # Ensure the response is fully read
-                pdf_file = BytesIO(content)
-                doc = fitz.open(stream=pdf_file, filetype="pdf")
-                full_text = ""
-                for page in doc:
-                    full_text += page.get_text()
-                return full_text.strip()
+        try:
+            async with session.get(pdf_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status != 200:
+                    print("❌ Failed to download PDF:", response.status)
+                    return None
+                else:
+                    print("✅ PDF downloaded successfully.")
+                    content = await response.read()  # Ensure the response is fully read
+                    pdf_file = BytesIO(content)
+                    doc = fitz.open(stream=pdf_file, filetype="pdf")
+                    full_text = ""
+                    for page in doc:
+                        full_text += page.get_text()
+                    return full_text.strip()
+        except Exception as e:
+            print(f"Error processing PDF: {str(e)}")
+            
         return ""
 
 
-
-
-
-    
 async def extract_google_scholar_papers(throttler=throttler_query, query: str=KEYWORD)-> dict:
     """Extract papers from Google Scholar based on a query.
 
@@ -257,7 +256,7 @@ async def extract_google_scholar_papers(throttler=throttler_query, query: str=KE
                     
                     if p_id in HISTORIES:
                         continue
-                    pdb.set_trace()
+                    # pdb.set_trace()
                     
                     HISTORIES.add(p_id)
                     
@@ -270,7 +269,7 @@ async def extract_google_scholar_papers(throttler=throttler_query, query: str=KE
                     pdf_tag = r.select_one(".gs_or_ggsm a")
                     pdf_link = pdf_tag["href"] if pdf_tag else None
                     curr["pdf_link"] = pdf_link if pdf_link else "N/A"
-                                
+                    print(curr)
                     print("-" * 80)
                     keynotes[p_id] = curr
                     if len(keynotes)>= 2:
@@ -279,6 +278,72 @@ async def extract_google_scholar_papers(throttler=throttler_query, query: str=KE
             await asyncio.sleep(1)
     return keynotes
 
+
+async def extract_arxiv_papers(throttler=throttler_query, query: str = KEYWORD, max_results=10) -> dict:
+    """Extract papers from arXiv based on a query.
+
+    Args:
+        throttler (Throttler): Throttler instance to limit request rate.
+        query (str): Search keyword.
+        max_results (int): Number of results to return.
+
+    Returns:
+        dict: Dictionary of paper information.
+    """
+    global HISTORIES
+
+    base_url = "http://export.arxiv.org/api/query?"
+    query_params = (
+        f"search_query=all:{query}"
+        f"&start=0&max_results={max_results}"
+        f"&sortBy=submittedDate&sortOrder=descending"
+    )
+    url = base_url + query_params
+
+    keynotes = {}
+
+    async with throttler:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    print(f"❌ Failed to fetch arXiv papers: {resp.status}")
+                    return {}
+
+                text = await resp.text()
+                feed = feedparser.parse(text)
+                # pdb.set_trace()
+                for entry in feed.entries:
+                    title = entry.title.strip()
+                    p_id = hashlib.md5(title.encode("utf-8")).hexdigest()
+                    
+                    if p_id in HISTORIES:
+                        continue
+                    
+                    HISTORIES.add(p_id)
+
+                    summary = entry.summary.strip()
+                    pdf_link = ""
+                    for link in entry.links:
+                        if link.rel == "alternate" and link.type == "application/pdf":
+                            pdf_link = link.href
+                            break
+                    
+                    # fallback to entry.id as PDF (works for most arXiv papers)
+                    if not pdf_link:
+                        pdf_link = entry.id.replace("abs", "pdf") + ".pdf"
+
+                    keynotes[p_id] = {
+                        "title": title,
+                        "abstract": summary,
+                        "pdf_link": pdf_link
+                    }
+
+                    print(keynotes[p_id])
+                    print("-" * 80)
+
+                await asyncio.sleep(1)
+
+    return keynotes
 
 
 async def load_and_summarize(pdf_link:str, max_tokens=250) -> str:
@@ -296,7 +361,7 @@ async def load_and_summarize(pdf_link:str, max_tokens=250) -> str:
         print(f"📄 PDF link: {pdf_link}")
 
         pdf_text = await download_and_extract_pdf_text(pdf_link)
-        pdb.set_trace()
+        # pdb.set_trace()
         
         @retry(
         wait=wait_exponential_jitter(initial=1, exp_base=2, jitter=2, max=10),
@@ -320,7 +385,7 @@ async def load_and_summarize(pdf_link:str, max_tokens=250) -> str:
                             max_tokens=max_tokens
                         )
                         res = parse_llm_response(resp)
-                        pdb.set_trace()
+                        # pdb.set_trace()
                         print("[Info] Summary length:", len(res))
                         return res
                 except Exception as e:
@@ -336,10 +401,7 @@ async def load_and_summarize(pdf_link:str, max_tokens=250) -> str:
         print("📄 PDF link: Not available")
         return ""
     
-    # pdb.set_trace()
-    
-    # pdb.set_trace()
-    # return res
+ 
 
 def load_old_articles(path=folder_path/"known_articles.json"):
     try:
@@ -413,21 +475,24 @@ async def main(queries=["llm security", "llm jailbreak", "ai agent"], path=folde
     import copy 
     previous_hist = copy.copy(HISTORIES)
     useless_models = load_useless()
-    pdb.set_trace()
     FREE_MODELS, useless_models = await update_good_models(useless_models)
     with open(folder_path/"useless_models.json", "w") as f:
         json.dump(useless_models, f, indent=4)
     SELECTED_MODEL = FREE_MODELS[0]["id"]
-    pdb.set_trace()
-    queries = ["llm security"]
+    queries = ["+(all:security+OR+all:jailbreak)"]
     tasks = []
     for query in queries:
-        tasks.append(extract_google_scholar_papers(throttler_query, query))
+        tasks.append(extract_arxiv_papers(throttler_query, query))
     parses = await asyncio.gather(*tasks)
+    
     all_papers = {}
+    
+    # // no summary parses
+    # for parse in parses:
+    #     all_papers.update(parse)
+    
+    #// for summary queries
     summarize_tasks = []
-    
-    
     p_ids = []
     for parse in parses:
         all_papers.update(parse)
@@ -435,13 +500,11 @@ async def main(queries=["llm security", "llm jailbreak", "ai agent"], path=folde
             if v.get("pdf_link") and v.get("pdf_link") != "N/A":
                 summarize_tasks.append(load_and_summarize(v["pdf_link"]))
                 p_ids.append(k)
-    pdb.set_trace()
     
     summaries = await asyncio.gather(*summarize_tasks)
     for p_id, summary in zip(p_ids, summaries):
         all_papers[p_id]["summary"] = summary
         
-    pdb.set_trace()    
     all_ids = set()
     for id_ in all_papers.keys():
         all_ids.add(id_)
