@@ -62,8 +62,7 @@ throttler_summary = Throttler(rate_limit=3, period=600)
 throttler_send = Throttler(rate_limit=1, period=1)
 
 
-KEYWORD = "llm security"
-URL = f"https://scholar.google.com/scholar?q={KEYWORD.replace(' ', '+')}"
+
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 THROUGHPUT = 20000
 MAX_PAGE = 10
@@ -138,7 +137,7 @@ async def update_good_models(useless_models)-> Tuple[list, dict]:
                 count += 1
             else:
                 if free_model["id"] not in useless_models:
-                    useless_models[free_model["id"]] = 0
+                    useless_models[free_model["id"]] = 1
                 else:
                     useless_models[free_model["id"]] += 1
         # pdb.set_trace()
@@ -193,11 +192,11 @@ async def download_and_extract_pdf_text(pdf_url:str):
         str: The extracted text content from the PDF or an error message.
     """
   
-    headers = {"User-Agent": "Mozilla/5.0"}
+
     
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(pdf_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
+            async with session.get(pdf_url, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status != 200:
                     print("❌ Failed to download PDF:", response.status)
                     return None
@@ -229,10 +228,9 @@ async def extract_google_scholar_papers(throttler=throttler_query, query: str=KE
     global HISTORIES
 
     url = f"https://scholar.google.com/scholar?q={query.replace(' ', '+')}&scisbd=1"
-    headers = {"User-Agent": "Mozilla/5.0"}
     async with throttler:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as resp:
+            async with session.get(url, headers=HEADERS) as resp:
                 if resp.status != 200:
                     print(f"❌ Failed to fetch papers: {resp.status}")
                     return {}
@@ -279,7 +277,7 @@ async def extract_google_scholar_papers(throttler=throttler_query, query: str=KE
     return keynotes
 
 
-async def extract_arxiv_papers(throttler=throttler_query, query: str = KEYWORD, max_results=10) -> dict:
+async def extract_arxiv_papers(throttler=throttler_query, query: str="llm", max_results: int=10) -> dict:
     """Extract papers from arXiv based on a query.
 
     Args:
@@ -438,6 +436,7 @@ async def send_telegram(throttler, msg:str):
                 if resp.status != 200:
                     print("❌ Failed to send message:", resp.status, await resp.text())
                 else:
+                    print("✅ Message sent successfully.")
                     await resp.text()
         
 
