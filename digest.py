@@ -215,12 +215,12 @@ async def download_and_extract_pdf_text(pdf_url:str):
         return ""
 
 
-async def extract_google_scholar_papers(throttler=throttler_query, query: str=KEYWORD)-> dict:
+async def extract_google_scholar_papers(throttler=throttler_query, query: str="llm security")-> dict:
     """Extract papers from Google Scholar based on a query.
 
     Args:
         throttler (Throttler, optional): Throttler instance to limit request rate. Defaults to throttler_query.
-        query (str, optional): Search query for Google Scholar. Defaults to KEYWORD.
+        query (str, optional): Search query for Google Scholar. Defaults to llm security.
 
     Returns:
         dict: A dictionary containing extracted paper information.
