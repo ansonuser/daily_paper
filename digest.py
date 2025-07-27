@@ -511,10 +511,11 @@ async def main(queries=["llm security", "llm jailbreak", "ai agent"], path=folde
     new_ids = list(previous_hist) + all_ids
     if len(new_ids) > MAX_IDS:
         new_ids = new_ids[-MAX_IDS:]
-    
+    new_ids.sort()
+
     with open(path, "w") as f:
         json.dump(list(new_ids), f, indent=4)
-        
+
     send_tasks = []
     for _,paper in all_papers.items():
         formatted_msg = format_telegram_message(paper)
